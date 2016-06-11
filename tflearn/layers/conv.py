@@ -355,6 +355,29 @@ def upsample_2d(incoming, kernel_size, name="UpSample2D"):
     return inference
 
 def score_layer(incoming, num_classes, shape=None, weight_decay=5e-4, name='Score'):
+    """ Score.
+
+    Input:
+        4-D Tensor [batch, height, width, in_channels].
+
+    Output:
+        4-D Tensor [batch, pooled height, pooled width, in_channels].
+
+    Arguments:
+        incoming: `Tensor`. Incoming 4-D Layer to upsample.
+        num_classes: `int`. Number of output feature maps.
+        shape: `tf.shape` or list of `ints`. Dimension of the output map
+            [batch_size, new height, new width]. For convinience four values
+             are allows [batch_size, new height, new width, X], where X
+             is ignored.
+        kernel_size: `int` or list of `ints`. Upsampling kernel size.
+        weight_decay: `float` 
+        name: A name for this layer (optional). Default: 'UpSample2D'.
+
+    Attributes:
+        scope: `Scope`. This layer scope.
+
+    """
 
     input_shape = utils.get_incoming_shape(incoming)
     assert len(input_shape) == 4, "Incoming Tensor shape must be 4-D"
