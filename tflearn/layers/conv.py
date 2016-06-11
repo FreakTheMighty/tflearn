@@ -3,6 +3,7 @@ from __future__ import division, print_function, absolute_import
 
 import tensorflow as tf
 import numpy as np
+import math
 
 import tflearn
 from .. import variables as vs
@@ -263,6 +264,54 @@ def upsample_2d(incoming, kernel_size, name="UpSample2D"):
 
     return inference
 
+def score_layer(incoming, num_classes, shape=None, weight_decay=5e-4, name='Score'):
+
+    input_shape = utils.get_incoming_shape(incoming)
+    assert len(input_shape) == 4, "Incoming Tensor shape must be 4-D"
+
+    with tf.variable_scope(name) as scope:
+        # get number of input channels
+        in_features = input_shape[3]
+        shape = [1, 1, in_features, num_classes]
+
+        if shape is None:
+            # Compute shape out of Bottom
+            in_shape = tf.shape(incoming)
+            new_shape = [1, 1, input_shape[3], num_classes]
+        else:
+            new_shape = [shape[0], shape[1], shape[2], num_classes]
+        output_shape = tf.pack(new_shape)
+
+        # Three initialization scheme
+        if name == "score_fr":
+            num_input = in_features
+            stddev = (2 / num_input)**0.5
+        elif name == "score_pool4":
+            stddev = 0.001
+        elif name == "score_pool3":
+            stddev = 0.0001
+
+        # Apply convolution
+        # NOTE: Pulled from utility function, may need new home
+        initializer = tf.truncated_normal_initializer(stddev=stddev)
+        weights = tf.get_variable('weights', shape=shape,
+                              initializer=initializer)
+
+        if weight_decay and (not tf.get_variable_scope().reuse):
+            weight_decay = tf.mul(tf.nn.l2_loss(weights), weight_decay, name='weight_loss')
+            tf.add_to_collection('losses', weight_decay)
+
+        conv = tf.nn.conv2d(incoming, weights, [1, 1, 1, 1], padding='SAME')
+
+        # Apply bias
+        conv_biases = tf.constant_initializer(0.0)
+        conv_biases = tf.get_variable(name='biases', shape=[num_classes],
+                               initializer=conv_biases)
+
+        bias = tf.nn.bias_add(conv, conv_biases)
+
+        return bias
+
 
 def upscore_layer(incoming, num_classes, shape=None, kernel_size=4,
                   strides=2, name='Upscore'):
@@ -323,7 +372,7 @@ def upscore_layer(incoming, num_classes, shape=None, kernel_size=4,
                 """
                 width = f_shape[0]
                 heigh = f_shape[0]
-                f = ceil(width/2.0)
+                f = math.ceil(width/2.0)
                 c = (2 * f - 1 - f % 2) / (2.0 * f)
                 bilinear = np.zeros([f_shape[0], f_shape[1]])
                 for x in range(width):
