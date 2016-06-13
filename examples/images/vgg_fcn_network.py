@@ -113,7 +113,6 @@ if train:
               show_metric=True, batch_size=32, snapshot_step=500,
               snapshot_epoch=False, run_id='vgg_oxflowers17')
 else:
-    import pdb; pdb.set_trace()
     img = misc.imread("./tabby_cat.png")/255.0
     resized = misc.imresize(img, (224, 224))
 
