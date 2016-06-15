@@ -18,6 +18,7 @@ from __future__ import division, print_function, absolute_import
 import numpy as np
 import tensorflow as tf
 import tflearn
+from tflearn import utils
 from scipy import misc
 from tflearn.layers.core import input_data, dropout, fully_connected
 from tflearn.layers.conv import conv_2d, max_pool_2d, upscore_layer, score_layer
@@ -40,10 +41,10 @@ def get_conv_filter(name, shape=None):
 
 
 # Building 'VGG Network'
-network = input_data(shape=[None, 224, 224, 3])
+images_placeholder = input_data(shape=[None, 224, 224, 3])
 
 # Conv 1
-network = conv_2d(network, 64, 3, activation='relu', weights_init=get_conv_filter('conv1_1'))
+network = conv_2d(images_placeholder, 64, 3, activation='relu', weights_init=get_conv_filter('conv1_1'))
 network = conv_2d(network, 64, 3, activation='relu', weights_init=get_conv_filter('conv1_2'))
 network = max_pool_2d(network, 2, strides=2)
 
@@ -108,28 +109,28 @@ model = tflearn.DNN(network, checkpoint_path='model_vgg',
                     max_checkpoints=1, tensorboard_verbose=0)
 #model.save('model_vgg')
 
-if train:
+with model.session.graph.as_default():
+  if train:
     model.fit(X, Y, n_epoch=500, shuffle=True,
               show_metric=True, batch_size=32, snapshot_step=500,
               snapshot_epoch=False, run_id='vgg_oxflowers17')
-else:
+  else:
     img = misc.imread("./tabby_cat.png")/255.0
     resized = misc.imresize(img, (224, 224))
-
-    images = tf.placeholder("float")
-    feed_dict = {images: img}
-    batch_images = tf.expand_dims(images, 0)
+    feed_dict = {images_placeholder: [resized]}
 
     print('Finished building Network.')
 
-    init = tf.initialize_all_variables()
-    model.session.run(tf.initialize_all_variables())
-    output = model.predict([resized])
+    #init = tf.initialize_all_variables()
+    #model.session.run(tf.initialize_all_variables())
 
     print('Running the Network')
     tensors = [pred, pred_up]
-    output = model.predict([resized])
-    down, up = model.session.run(tensors, feed_dict=feed_dict)
+    dwn, p = model.session.run(tensors, feed_dict=feed_dict)
+    print(dwn)
+    print(p)
+    # output = model.predict([resized])
+    # down, up = model.session.run(tensors, feed_dict=feed_dict)
 
     # down_color = utils.color_image(down[0])
     # up_color = utils.color_image(up[0])

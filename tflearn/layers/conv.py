@@ -354,7 +354,7 @@ def upsample_2d(incoming, kernel_size, name="UpSample2D"):
 
     return inference
 
-def score_layer(incoming, num_classes, shape=None, weight_decay=5e-4, name='Score'):
+def score_layer(incoming, num_classes, weight_decay=5e-4, name='Score'):
     """ Score.
 
     Input:
@@ -386,14 +386,6 @@ def score_layer(incoming, num_classes, shape=None, weight_decay=5e-4, name='Scor
         # get number of input channels
         in_features = input_shape[3]
         shape = [1, 1, in_features, num_classes]
-
-        if shape is None:
-            # Compute shape out of Bottom
-            in_shape = tf.shape(incoming)
-            new_shape = [1, 1, input_shape[3], num_classes]
-        else:
-            new_shape = [shape[0], shape[1], shape[2], num_classes]
-        output_shape = tf.pack(new_shape)
 
         # Three initialization scheme
         if name == "score_fr":
