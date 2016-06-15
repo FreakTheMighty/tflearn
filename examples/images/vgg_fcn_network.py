@@ -30,7 +30,8 @@ weights =  np.load('vgg16.npy').item()
 # import tflearn.datasets.oxflower17 as oxflower17
 # X, Y = oxflower17.load_data(one_hot=True)
 train = False
-num_classes = 17
+num_classes = 20
+VGG_MEAN = [103.939, 116.779, 123.68]
 
 def get_conv_filter(name, shape=None):
     data = weights[name][0]
@@ -39,12 +40,29 @@ def get_conv_filter(name, shape=None):
     init = tf.constant(value=data, dtype=tf.float32)
     return init
 
+def color_image(image, num_classes=20):
+    import matplotlib as mpl
+    from matplotlib import cm
+    norm = mpl.colors.Normalize(vmin=0., vmax=num_classes)
+    mycm = cm.get_cmap('Set1')
+    return mycm(norm(image))
+
 
 # Building 'VGG Network'
 images_placeholder = input_data(shape=[None, 224, 224, 3])
 
+red, green, blue = tf.split(3, 3, images_placeholder)
+# assert red.get_shape().as_list()[1:] == [224, 224, 1]
+# assert green.get_shape().as_list()[1:] == [224, 224, 1]
+# assert blue.get_shape().as_list()[1:] == [224, 224, 1]
+bgr = tf.concat(3, [
+    blue - VGG_MEAN[0],
+    green - VGG_MEAN[1],
+    red - VGG_MEAN[2],
+])
+
 # Conv 1
-network = conv_2d(images_placeholder, 64, 3, activation='relu', weights_init=get_conv_filter('conv1_1'))
+network = conv_2d(bgr, 64, 3, activation='relu', weights_init=get_conv_filter('conv1_1'))
 network = conv_2d(network, 64, 3, activation='relu', weights_init=get_conv_filter('conv1_2'))
 network = max_pool_2d(network, 2, strides=2)
 
@@ -73,32 +91,42 @@ network = max_pool_2d(network, 2, strides=2)
 
 # FC 6
 network = conv_2d(network, 4096, 7, activation='relu', weights_init=get_conv_filter('fc6', shape=[7, 7, 512, 4096]))
-network = dropout(network, 0.5)
+if train:
+  network = dropout(network, 0.5)
 
 # FC 7
 network = conv_2d(network, 4096, 1, activation='relu', weights_init=get_conv_filter('fc7', shape=[1, 1, 4096, 4096]))
-network = dropout(network, 0.5)
+if train:
+  network = dropout(network, 0.5)
 
-pred = tf.argmax(network, dimension=3)
+score_fr = score_layer(pool4, num_classes=num_classes, name='score_fr')
+pred = tf.argmax(score_fr, dimension=3)
 
-upscore2 = upscore_layer(network,
-                         shape=tf.shape(pool4),
-                         num_classes=num_classes,
-                         kernel_size=4, strides=2, name='upscore2')
+upscore = upscore_layer(score_fr, num_classes=num_classes,
+                                   name='up', kernel_size=64, strides=32)
+pred_up = tf.argmax(upscore, dimension=3)
 
-score_pool4 = score_layer(pool4, num_classes=num_classes, name='score_pool4')
-fuse_pool4 = tf.add(upscore2, score_pool4)
 
-upscore4 = upscore_layer(fuse_pool4, num_classes=num_classes,
-                         kernel_size=4, strides=2, name='upscore4')
+# pred = tf.argmax(network, dimension=3)
 
-score_pool3 = score_layer(pool3, num_classes=num_classes, name='score_pool3')
-fuse_pool3 = tf.add(upscore4, score_pool3)
+# upscore2 = upscore_layer(network,
+#                          shape=tf.shape(pool4),
+#                          num_classes=num_classes,
+#                          kernel_size=4, strides=2, name='upscore2')
 
-upscore32 = upscore_layer(fuse_pool3, num_classes=num_classes,
-                          kernel_size=16, strides=8, name='upscore32')
+# score_pool4 = score_layer(pool4, num_classes=num_classes, name='score_pool4')
+# fuse_pool4 = tf.add(upscore2, score_pool4)
 
-pred_up = tf.argmax(upscore32, dimension=3)
+# upscore4 = upscore_layer(fuse_pool4, num_classes=num_classes,
+#                          kernel_size=4, strides=2, name='upscore4')
+
+# score_pool3 = score_layer(pool3, num_classes=num_classes, name='score_pool3')
+# fuse_pool3 = tf.add(upscore4, score_pool3)
+
+# upscore32 = upscore_layer(fuse_pool3, num_classes=num_classes,
+#                           kernel_size=16, strides=8, name='upscore32')
+
+# pred_up = tf.argmax(upscore32, dimension=3)
 
 network = regression(network, optimizer='adam',
                      loss='categorical_crossentropy',
@@ -115,7 +143,7 @@ with model.session.graph.as_default():
               show_metric=True, batch_size=32, snapshot_step=500,
               snapshot_epoch=False, run_id='vgg_oxflowers17')
   else:
-    img = misc.imread("./tabby_cat.png")/255.0
+    img = misc.imread("./tabby_cat.png")
     resized = misc.imresize(img, (224, 224))
     feed_dict = {images_placeholder: [resized]}
 
@@ -126,9 +154,14 @@ with model.session.graph.as_default():
 
     print('Running the Network')
     tensors = [pred, pred_up]
-    dwn, p = model.session.run(tensors, feed_dict=feed_dict)
-    print(dwn)
-    print(p)
+    down, up = model.session.run(tensors, feed_dict=feed_dict)
+
+    down_color = color_image(down[0])
+    up_color = color_image(up[0])
+
+    misc.imsave('fcn32_downsampled.png', down_color)
+    misc.imsave('fcn32_upsampled.png', up_color)
+
     # output = model.predict([resized])
     # down, up = model.session.run(tensors, feed_dict=feed_dict)
 
