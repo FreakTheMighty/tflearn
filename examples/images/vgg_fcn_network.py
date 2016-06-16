@@ -40,6 +40,36 @@ def get_conv_filter(name, shape=None):
     init = tf.constant(value=data, dtype=tf.float32)
     return init
 
+def bias_reshape(bweight, num_orig, num_new):
+    n_averaged_elements = num_orig//num_new
+    avg_bweight = np.zeros(num_new)
+    for i in range(0, num_orig, n_averaged_elements):
+        start_idx = i
+        end_idx = start_idx + n_averaged_elements
+        avg_idx = start_idx//n_averaged_elements
+        avg_bweight[avg_idx] = np.mean(bweight[start_idx:end_idx])
+    return avg_bweight
+
+def get_bias(name, num_classes=None):
+    bias_wights = weights[name][1]
+    shape = weights[name][1].shape
+    if name == 'fc8':
+        bias_wights = bias_reshape(bias_wights, shape[0],
+                                         num_classes)
+        shape = [num_classes]
+    init = tf.constant_initializer(value=bias_wights,
+                                   dtype=tf.float32)
+    #return tf.get_variable(name="biases", initializer=init, shape=shape)
+    return init
+
+
+def get_conv_bias(name, shape=None):
+    data = weights[name][0]
+    if shape:
+      data = data.reshape(shape)
+    init = tf.constant(value=data, dtype=tf.float32)
+    return init
+
 def color_image(image, num_classes=20):
     import matplotlib as mpl
     from matplotlib import cm
@@ -47,6 +77,12 @@ def color_image(image, num_classes=20):
     mycm = cm.get_cmap('Set1')
     return mycm(norm(image))
 
+def conv_layer(network, nb_filter, filter_size, layer, conv_shape=None):
+    bias = get_bias(layer)
+    weights = get_conv_filter(layer, conv_shape)
+    import pdb; pdb.set_trace();
+    return conv_2d(network, nb_filter, filter_size, activation='relu', 
+      weights_init=weights, bias_init=bias)
 
 # Building 'VGG Network'
 images_placeholder = input_data(shape=[None, 224, 224, 3])
@@ -62,40 +98,40 @@ bgr = tf.concat(3, [
 ])
 
 # Conv 1
-network = conv_2d(bgr, 64, 3, activation='relu', weights_init=get_conv_filter('conv1_1'))
-network = conv_2d(network, 64, 3, activation='relu', weights_init=get_conv_filter('conv1_2'))
+network = conv_layer(bgr, 64, 3, 'conv1_1')
+network = conv_layer(network, 64, 3, 'conv1_2')
 network = max_pool_2d(network, 2, strides=2)
 
 # Conv 2
-network = conv_2d(network, 128, 3, activation='relu', weights_init=get_conv_filter('conv2_1'))
-network = conv_2d(network, 128, 3, activation='relu', weights_init=get_conv_filter('conv2_2'))
+network = conv_layer(network, 128, 3, 'conv2_1')
+network = conv_layer(network, 128, 3, 'conv2_2')
 network = max_pool_2d(network, 2, strides=2)
 
 # Conv 3
-network = conv_2d(network, 256, 3, activation='relu', weights_init=get_conv_filter('conv3_1'))
-network = conv_2d(network, 256, 3, activation='relu', weights_init=get_conv_filter('conv3_2'))
-network = conv_2d(network, 256, 3, activation='relu', weights_init=get_conv_filter('conv3_3'))
+network = conv_layer(network, 256, 3, 'conv3_1')
+network = conv_layer(network, 256, 3, 'conv3_2')
+network = conv_layer(network, 256, 3, 'conv3_3')
 pool3 = max_pool_2d(network, 2, strides=2)
 
 # Conv 4
-network = conv_2d(pool3, 512, 3, activation='relu', weights_init=get_conv_filter('conv4_1'))
-network = conv_2d(network, 512, 3, activation='relu', weights_init=get_conv_filter('conv4_2'))
-network = conv_2d(network, 512, 3, activation='relu', weights_init=get_conv_filter('conv4_3'))
+network = conv_layer(pool3, 512, 3, 'conv4_1')
+network = conv_layer(network, 512, 3, 'conv4_2')
+network = conv_layer(network, 512, 3, 'conv4_3')
 pool4 = max_pool_2d(network, 2, strides=2)
 
 # Conv 5
-network = conv_2d(pool4, 512, 3, activation='relu', weights_init=get_conv_filter('conv5_1'))
-network = conv_2d(network, 512, 3, activation='relu', weights_init=get_conv_filter('conv5_2'))
-network = conv_2d(network, 512, 3, activation='relu', weights_init=get_conv_filter('conv5_3'))
+network = conv_layer(pool4, 512, 3, 'conv5_1')
+network = conv_layer(network, 512, 3, 'conv5_2')
+network = conv_layer(network, 512, 3, 'conv5_3')
 network = max_pool_2d(network, 2, strides=2)
 
 # FC 6
-network = conv_2d(network, 4096, 7, activation='relu', weights_init=get_conv_filter('fc6', shape=[7, 7, 512, 4096]))
+network = conv_layer(network, 4096, 7, 'fc6', conv_shape=[7, 7, 512, 4096])
 if train:
   network = dropout(network, 0.5)
 
 # FC 7
-network = conv_2d(network, 4096, 1, activation='relu', weights_init=get_conv_filter('fc7', shape=[1, 1, 4096, 4096]))
+network = conv_layer(network, 4096, 1, 'fc7', conv_shape=[1, 1, 4096, 4096])
 if train:
   network = dropout(network, 0.5)
 
