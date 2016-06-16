@@ -7,7 +7,8 @@ import tensorflow as tf
 def merge(tensors_list, mode, axis=1, name="Merge"):
     """ Merge.
 
-    Merge a list of `Tensor` into a single one.
+    Merge a list of `Tensor` into a single one. A merging 'mode' must be
+    specified, check below for the different options.
 
     Input:
         List of Tensors.
@@ -74,6 +75,9 @@ def merge(tensors_list, mode, axis=1, name="Merge"):
         else:
             raise Exception("Unknown merge mode", str(mode))
 
+    # Track output tensor.
+    tf.add_to_collection(tf.GraphKeys.LAYER_TENSOR + '/' + name, inference)
+
     return inference
 
 
@@ -97,4 +101,9 @@ def merge_outputs(tensor_list, name="MergeOutputs"):
 
     """
     with tf.name_scope(name) as scope:
-        return tf.concat(0, tensor_list)
+        x = tf.concat(1, tensor_list)
+
+    # Track output tensor.
+    tf.add_to_collection(tf.GraphKeys.LAYER_TENSOR + '/' + name, x)
+
+    return x

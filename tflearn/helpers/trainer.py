@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 from __future__ import division, print_function, absolute_import
 
+import re
 import numpy as np
 import tensorflow as tf
 from tensorflow.python.training import optimizer as tf_optimizer
@@ -41,6 +42,8 @@ class Trainer(object):
             ```
         checkpoint_path: `str`. Path to store model checkpoints. If None,
             no model checkpoint will be saved. Default: None.
+        best_checkpoint_path: `str`. Path to store the model when the validation rate reaches its
+            highest point of the current training session and also is above best_val_accuracy. Default: None.
         max_checkpoints: `int` or None. Maximum amount of checkpoints. If
             None, no limit. Default: None.
         keep_checkpoint_every_n_hours: `float`. Number of hours between each
@@ -50,15 +53,19 @@ class Trainer(object):
         session: `Session`. A session for running ops. If None, a new one will
             be created. Note: When providing a session, variables must have been
             initialized already, otherwise an error will be raised.
+        best_val_accuracy: `float` The minimum validation accuracy that needs to be
+            achieved before a model weight's are saved to the best_checkpoint_path. This
+            allows the user to skip early saves and also set a minimum save point when continuing
+            to train a reloaded model. Default: 0.0.
 
     """
 
     def __init__(self, train_ops, graph=None, clip_gradients=5.0,
                  tensorboard_dir="/tmp/tflearn_logs/",
-                 tensorboard_verbose=0, checkpoint_path=None,
+                 tensorboard_verbose=0, checkpoint_path=None, best_checkpoint_path=None,
                  max_checkpoints=None,
                  keep_checkpoint_every_n_hours=10000.0, random_seed=None,
-                 session=None):
+                 session=None, best_val_accuracy=0.0):
 
         self.graph = tf.get_default_graph()
         if graph:
@@ -85,6 +92,8 @@ class Trainer(object):
                                            trainable=False)
             self.incr_global_step = tf.assign(self.global_step,
                                               tf.add(self.global_step, 1))
+            self.best_val_accuracy = best_val_accuracy
+            self.best_checkpoint_path = best_checkpoint_path
 
             config = None
             tflearn_conf = tf.get_collection(tf.GraphKeys.GRAPH_CONFIG)
@@ -123,7 +132,16 @@ class Trainer(object):
                 var_list=to_restore,
                 max_to_keep=max_checkpoints,
                 keep_checkpoint_every_n_hours=keep_checkpoint_every_n_hours)
+            # A second Saver, that only restore trainable variables
+            to_restore_trainvars = [item for item in tf.trainable_variables()
+                                    if check_restore_tensor(item, excl_vars)]
+            self.restorer_trainvars = tf.train.Saver(
+                var_list=to_restore_trainvars,
+                max_to_keep=max_checkpoints,
+                keep_checkpoint_every_n_hours=keep_checkpoint_every_n_hours)
 
+            self.to_restore = to_restore
+            self.to_restore_trainvars = to_restore_trainvars
             self.checkpoint_path = checkpoint_path
 
             if not self.restored:
@@ -223,6 +241,9 @@ class Trainer(object):
             modelsaver = callbacks.ModelSaver(self.save,
                                               self.training_step,
                                               self.checkpoint_path,
+                                              self.best_checkpoint_path,
+                                              self.best_val_accuracy,
+                                              snapshot_step,
                                               snapshot_epoch)
 
             for i, train_op in enumerate(self.train_ops):
@@ -272,7 +293,7 @@ class Trainer(object):
                             modelsaver.on_sub_batch_begin()
 
                             snapshot = train_op._train(self.training_step,
-                                                       snapshot_epoch,
+                                                       (bool(self.best_checkpoint_path) | snapshot_epoch),
                                                        snapshot_step,
                                                        show_metric)
                             global_loss += train_op.loss_value
@@ -296,7 +317,9 @@ class Trainer(object):
                         self.session.run(self.incr_global_step)
                         termlogger.on_batch_end(global_loss, global_acc,
                                                 snapshot)
-                        modelsaver.on_batch_end(snapshot)
+                        modelsaver.on_batch_end(snapshot, self.best_checkpoint_path, train_op.val_acc)
+                        if self.best_checkpoint_path:
+                            self.best_val_accuracy = modelsaver.best_val_accuracy
 
                     # Epoch end
                     termlogger.on_epoch_end()
@@ -325,10 +348,14 @@ class Trainer(object):
         try:
             # Try latest api
             l = tf.get_collection_ref("summary_tags")
+            l4 = tf.get_collection_ref(tf.GraphKeys.GRAPH_CONFIG)
         except Exception:
             l = tf.get_collection("summary_tags")
+            l4 = tf.get_collection(tf.GraphKeys.GRAPH_CONFIG)
         l_stags = list(l)
+        l4_stags = list(l4)
         del l[:]
+        del l4[:]
 
         try:
             # Try latest api
@@ -357,6 +384,8 @@ class Trainer(object):
         # 0.7 workaround, restore values
         for t in l_stags:
             tf.add_to_collection("summary_tags", t)
+        for t in l4_stags:
+            tf.add_to_collection(tf.GraphKeys.GRAPH_CONFIG, t)
         for t in l1_dtags:
             tf.add_to_collection(tf.GraphKeys.DATA_PREP, t)
         for t in l2_dtags:
@@ -364,19 +393,69 @@ class Trainer(object):
         for t in l3_tags:
             tf.add_to_collection(tf.GraphKeys.EXCL_RESTORE_VARS, t)
 
-    def restore(self, model_file):
+    def restore(self, model_file, trainable_variable_only=False, variable_name_map=None, scope_for_restore=None,
+                create_new_session=True, verbose=False):
         """ restore.
 
         Restore a Tensorflow model
 
         Arguments:
             model_file: path of tensorflow model to restore
-
+            trainable_variable_only: If True, only restore trainable variables.
+            variable_name_map: - a (pattern, repl) tuple providing a regular expression pattern
+                                 and replacement, which is applied to variable names, before
+                                 restoration from the model file
+                               - OR, a function map_func, used to perform the mapping, called as:
+                                 name_in_file = map_func(existing_var_op_name)
+                                 The function may return None to indicate a variable is not to be
+                                 restored.
+            scope_for_restore: string specifying the scope to limit to, when restoring variables.
+                               Also removes the scope name prefix from the var name to use when restoring.
+            create_new_session: Set to False if the current session is to be kept.  
+                                Set to True (the default) to create a new session, and re-init all variables.
+            verbose           : Set to True to see a printout of what variables are being restored,
+                                when using scope_for_restore or variable_name_map
+        
         """
-        self.close_session()
-        self.session = tf.Session()
-        self.session.run(tf.initialize_all_variables())
-        self.restorer.restore(self.session, model_file)
+        if create_new_session:
+            self.close_session()
+            self.session = tf.Session()
+            self.session.run(tf.initialize_all_variables())
+
+        if scope_for_restore is not None:	# allow variables to be restored into a different scope
+            sname = scope_for_restore
+            def vn_map_func(existing_name):		# variable name map function which removes the scope name, e.g.
+                if not existing_name.startswith(sname):  # so that "scope_name/var_name/... is retrieved from var_name/...
+                    return None			# and variables outside of scope_name are not restored
+                name_in_file = re.sub("^%s/" % sname, "", existing_name)
+                if verbose:
+                    print ("[%s] Restoring %s <- %s" % (sname, existing_name, name_in_file))
+                return name_in_file
+            variable_name_map = vn_map_func
+
+        if variable_name_map is not None:	# general-purpose remapping of variable names (name in file vs existing name)
+            if type(variable_name_map)==tuple:	# tuple interpreted as regular expression pattern substitution
+                (pattern, repl) = variable_name_map
+                def vn_map_func(existing_name):
+                    name_in_file = re.sub(pattern, repl, existing_name)
+                    if verbose:
+                        print ("Restoring %s <- %s" % (existing_name, name_in_file))
+                    return name_in_file
+            else:
+                vn_map_func = variable_name_map	# allow arbitrary user-provided mapping function
+            if trainable_variable_only:		# restore either trainingable variables only, or all variables
+                to_restore = self.to_restore_trainvars
+            else:
+                to_restore = self.to_restore
+            renamed_to_restore = {vn_map_func(v.op.name): v for v in to_restore}
+            if None in renamed_to_restore:
+                renamed_to_restore.pop(None)
+            restorer = tf.train.Saver(var_list=renamed_to_restore)
+            restorer.restore(self.session, model_file)
+        elif not trainable_variable_only:
+            self.restorer.restore(self.session, model_file)
+        else:
+            self.restorer_trainvars.restore(self.session, model_file)
         for o in self.train_ops:
             o.session = self.session
         self.restored = True

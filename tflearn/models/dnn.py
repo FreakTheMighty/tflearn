@@ -10,6 +10,8 @@ from ..utils import feed_dict_builder, is_none, get_tensor_parents_placeholders
 class DNN(object):
     """ Deep Neural Network Model.
 
+    TODO: complete description
+
     Arguments:
         network: `Tensor`. Neural network to be used.
         tensorboard_verbose: `int`. Summary verbose level, it accepts
@@ -25,11 +27,17 @@ class DNN(object):
             Default: "/tmp/tflearn_logs/"
         checkpoint_path: `str`. Path to store model checkpoints. If None,
             no model checkpoint will be saved. Default: None.
+        best_checkpoint_path: `str`. Path to store the model when the validation rate reaches its
+            highest point of the current training session and also is above best_val_accuracy. Default: None.
         max_checkpoints: `int` or None. Maximum amount of checkpoints. If
             None, no limit. Default: None.
         session: `Session`. A session for running ops. If None, a new one will
             be created. Note: When providing a session, variables must have been
             initialized already, otherwise an error will be raised.
+        best_val_accuracy: `float` The minimum validation accuracy that needs to be
+            achieved before a model weight's are saved to the best_checkpoint_path. This
+            allows the user to skip early saves and also set a minimum save point when continuing
+            to train a reloaded model. Default: 0.0.
 
     Attributes:
         trainer: `Trainer`. Handle model training.
@@ -39,22 +47,20 @@ class DNN(object):
     """
 
     def __init__(self, network, clip_gradients=5.0, tensorboard_verbose=0,
-                 tensorboard_dir="/tmp/tflearn_logs/", checkpoint_path=None,
-                 max_checkpoints=None, session=None):
+                 tensorboard_dir="/tmp/tflearn_logs/", checkpoint_path=None, best_checkpoint_path=None,
+                 max_checkpoints=None, session=None, best_val_accuracy=0.0):
         assert isinstance(network, tf.Tensor), "'network' arg is not a Tensor!"
         self.net = network
         self.train_ops = tf.get_collection(tf.GraphKeys.TRAIN_OPS)
-        if len(self.train_ops) == 0:
-            raise Exception('tf collection "' + tf.GraphKeys.TRAIN_OPS + '" '
-                            'is empty! Please make sure you are using '
-                            '`regression` layer in your network.')
         self.trainer = Trainer(self.train_ops,
                                clip_gradients=clip_gradients,
                                tensorboard_dir=tensorboard_dir,
                                tensorboard_verbose=tensorboard_verbose,
                                checkpoint_path=checkpoint_path,
+                               best_checkpoint_path=best_checkpoint_path,
                                max_checkpoints=max_checkpoints,
-                               session=session)
+                               session=session,
+                               best_val_accuracy=best_val_accuracy)
         self.session = self.trainer.session
 
         self.inputs = tf.get_collection(tf.GraphKeys.INPUTS)
@@ -133,6 +139,11 @@ class DNN(object):
             run_id: `str`. Give a name for this run. (Useful for Tensorboard).
 
         """
+        if len(self.train_ops) == 0:
+            raise Exception('tf collection "' + tf.GraphKeys.TRAIN_OPS + '" '
+                            'is empty! Please make sure you are using '
+                            '`regression` layer in your network.')
+
         if batch_size:
             for train_op in self.train_ops:
                 train_op.batch_size = batch_size
@@ -215,16 +226,23 @@ class DNN(object):
         #with self.graph.as_default():
         self.trainer.save(model_file)
 
-    def load(self, model_file):
+    def load(self, model_file, weights_only=False, **optargs):
         """ Load.
 
         Restore model weights.
 
         Arguments:
             model_file: `str`. Model path.
-
+            weights_only: `bool`. If True, only weights will be restored (
+                and not intermediate variable, such as step counter, moving
+                averages...). Note that if you are using batch normalization,
+                averages will not be restored as well.
+            optargs: optional extra arguments for trainer.restore (see helpers/trainer.py)
+                     These optional arguments may be used to limit the scope of
+                     variables restored, and to control whether a new session is 
+                     created for the restored variables.
         """
-        self.trainer.restore(model_file)
+        self.trainer.restore(model_file, weights_only, **optargs)
         self.session = self.trainer.session
         self.predictor = Evaluator([self.net],
                                    session=self.session,

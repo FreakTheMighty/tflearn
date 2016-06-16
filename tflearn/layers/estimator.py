@@ -3,7 +3,7 @@ from __future__ import division, print_function, absolute_import
 
 import tensorflow as tf
 
-import  tflearn
+from ..layers import core
 from tflearn import utils
 from tflearn import objectives
 from tflearn import metrics
@@ -14,9 +14,28 @@ from tflearn.helpers.trainer import TrainOp
 def regression(incoming, placeholder=None, optimizer='adam',
                loss='categorical_crossentropy', metric='default',
                learning_rate=0.001, dtype=tf.float32, batch_size=64,
-               shuffle_batches=True, trainable_vars=None, restore=True,
-               op_name=None, name=None):
+               shuffle_batches=True, to_one_hot=False, n_classes=None,
+               trainable_vars=None, restore=True, op_name=None, name=None):
     """ Regression.
+
+    The regression layer is used in TFLearn to apply a regression (linear or
+    logistic) to the provided input. It requires to specify a TensorFlow
+    gradient descent optimizer 'optimizer' that will minimize the provided
+    loss function 'loss' (which calculate the errors). A metric can also be
+    provided, to evaluate the model performance.
+
+    A 'TrainOp' is generated, holding all information about the optimization
+    process. It is added to TensorFlow collection 'tf.GraphKeys.TRAIN_OPS'
+    and later used by TFLearn 'models' classes to perform the training.
+
+    An optional placeholder 'placeholder' can be specified to use a custom
+    TensorFlow target placeholder instead of creating a new one. The target
+    placeholder is added to the 'tf.GraphKeys.TARGETS' TensorFlow
+    collection, so that it can be retrieved later.
+
+    Additionaly, a list of variables 'trainable_vars' can be specified,
+    so that only them will be updated when applying the backpropagation
+    algorithm.
 
     Input:
         2-D Tensor Layer.
@@ -31,7 +50,7 @@ def regression(incoming, placeholder=None, optimizer='adam',
             You can retrieve that placeholder through graph key: 'TARGETS',
             or the 'placeholder' attribute of this function's returned tensor.
         optimizer: `str` (name), `Optimizer` or `function`. Optimizer to use.
-            Default: 'sgd' (Stochastic Descent Gradient).
+            Default: 'adam' (Adaptive Moment Estimation).
         loss: `str` (name) or `function`. Loss function used by this layer
             optimizer. Default: 'categorical_crossentropy'.
         metric: `str`, `Metric` or `function`. The metric to be used.
@@ -43,6 +62,10 @@ def regression(incoming, placeholder=None, optimizer='adam',
             supports different batch size for every optimizers. Default: 64.
         shuffle_batches: `bool`. Shuffle or not this optimizer batches at
             every epoch. Default: True.
+        to_one_hot: `bool`. If True, labels will be encoded to one hot vectors.
+            'n_classes' must then be specified.
+        n_classes: `int`. The total number of classes. Only required when using
+            'to_one_hot' option.
         trainable_vars: list of `Variable`. If specified, this regression will
             only update given variable weights. Else, all trainale variable
             are going to be updated.
@@ -60,12 +83,18 @@ def regression(incoming, placeholder=None, optimizer='adam',
 
     input_shape = utils.get_incoming_shape(incoming)
 
-    if not placeholder:
+    if placeholder is None:
         pscope = "TargetsData" if not name else name
         with tf.name_scope(pscope):
-            placeholder = tf.placeholder(shape=input_shape, dtype=dtype, name="Y")
+            p_shape = [None] if to_one_hot else input_shape
+            placeholder = tf.placeholder(shape=p_shape, dtype=dtype, name="Y")
 
     tf.add_to_collection(tf.GraphKeys.TARGETS, placeholder)
+
+    if to_one_hot:
+        if n_classes is None:
+            raise Exception("'n_classes' is required when using 'to_one_hot'.")
+        placeholder = core.one_hot_encoding(placeholder, n_classes)
 
     step_tensor = None
     # Building Optimizer
