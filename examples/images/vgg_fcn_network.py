@@ -50,6 +50,31 @@ def bias_reshape(bweight, num_orig, num_new):
         avg_bweight[avg_idx] = np.mean(bweight[start_idx:end_idx])
     return avg_bweight
 
+def summary_reshape(fweight, shape, num_new):
+    num_orig = shape[3]
+    shape[3] = num_new
+    n_averaged_elements = num_orig//num_new
+    avg_fweight = np.zeros(shape)
+    for i in range(0, num_orig, n_averaged_elements):
+        start_idx = i
+        end_idx = start_idx + n_averaged_elements
+        avg_idx = start_idx//n_averaged_elements
+        avg_fweight[:, :, :, avg_idx] = np.mean(
+            fweight[:, :, :, start_idx:end_idx], axis=3)
+    return avg_fweight
+
+def get_fc_weight_reshape(name, shape, num_classes=None):
+    print('Layer name: %s' % name)
+    print('Layer shape: %s' % shape)
+    w = weights[name][0]
+    w = w.reshape(shape)
+    if num_classes is not None:
+        w = summary_reshape(w, shape,
+                                        num_new=num_classes)
+    init = tf.constant_initializer(value=w,
+                                   dtype=tf.float32)
+    return init
+
 def get_bias(name, num_classes=None):
     bias_wights = weights[name][1]
     shape = weights[name][1].shape
@@ -59,15 +84,6 @@ def get_bias(name, num_classes=None):
         shape = [num_classes]
     init = tf.constant_initializer(value=bias_wights,
                                    dtype=tf.float32)
-    #return tf.get_variable(name="biases", initializer=init, shape=shape)
-    return init
-
-
-def get_conv_bias(name, shape=None):
-    data = weights[name][0]
-    if shape:
-      data = data.reshape(shape)
-    init = tf.constant(value=data, dtype=tf.float32)
     return init
 
 def color_image(image, num_classes=20):
@@ -80,9 +96,14 @@ def color_image(image, num_classes=20):
 def conv_layer(network, nb_filter, filter_size, layer, conv_shape=None):
     bias = get_bias(layer)
     weights = get_conv_filter(layer, conv_shape)
-    import pdb; pdb.set_trace();
     return conv_2d(network, nb_filter, filter_size, activation='relu', 
       weights_init=weights, bias_init=bias)
+
+def fc_layer(network, layer, num_classes=None):
+    weights = get_fc_weight_reshape(layer, [1, 1, 4096, 1000], num_classes=num_classes)
+    bias = get_bias(layer, num_classes=num_classes)
+    upscore = conv_2d(network, num_classes, 1, weights_init=weights, bias_init=bias, strides=1)
+    return upscore
 
 # Building 'VGG Network'
 images_placeholder = input_data(shape=[None, 224, 224, 3])
@@ -138,8 +159,8 @@ if train:
 score_fr = score_layer(pool4, num_classes=num_classes, name='score_fr')
 pred = tf.argmax(score_fr, dimension=3)
 
-upscore = upscore_layer(score_fr, num_classes=num_classes,
-                                   name='up', kernel_size=64, strides=32)
+upscore = fc_layer(score_fr, 'fc8', num_classes=num_classes)
+
 pred_up = tf.argmax(upscore, dimension=3)
 
 
