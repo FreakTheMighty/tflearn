@@ -69,8 +69,7 @@ def get_fc_weight_reshape(name, shape, num_classes=None):
     w = weights[name][0]
     w = w.reshape(shape)
     if num_classes is not None:
-        w = summary_reshape(w, shape,
-                                        num_new=num_classes)
+        w = summary_reshape(w, shape, num_new=num_classes)
     init = tf.constant_initializer(value=w,
                                    dtype=tf.float32)
     return init
@@ -99,11 +98,16 @@ def conv_layer(network, nb_filter, filter_size, layer, conv_shape=None):
     return conv_2d(network, nb_filter, filter_size, activation='relu', 
       weights_init=weights, bias_init=bias)
 
-def fc_layer(network, layer, num_classes=None):
-    weights = get_fc_weight_reshape(layer, [1, 1, 4096, 1000], num_classes=num_classes)
+def fc_layer(network, nb_filter, filter_size, layer, num_classes=None):
+    shape = None
+    if layer is 'fc6':
+        shape = [7, 7, 512, 4096]
+    elif layer is 'fc8':
+        shape = [1, 1, 4096, 1000]
+    weights = get_fc_weight_reshape(layer, shape, num_classes=num_classes)
     bias = get_bias(layer, num_classes=num_classes)
-    upscore = conv_2d(network, num_classes, 1, weights_init=weights, bias_init=bias, strides=1)
-    return upscore
+    fc = conv_2d(network, nb_filter, filter_size, weights_init=weights, bias_init=bias)
+    return fc
 
 # Building 'VGG Network'
 images_placeholder = input_data(shape=[None, 224, 224, 3])
@@ -147,43 +151,33 @@ network = conv_layer(network, 512, 3, 'conv5_3')
 network = max_pool_2d(network, 2, strides=2)
 
 # FC 6
-network = conv_layer(network, 4096, 7, 'fc6', conv_shape=[7, 7, 512, 4096])
+network = fc_layer(network, 4096, 7, 'fc6')
 if train:
   network = dropout(network, 0.5)
 
 # FC 7
-network = conv_layer(network, 4096, 1, 'fc7', conv_shape=[1, 1, 4096, 4096])
+network = fc_layer(network, 4096, 1, 'fc7')
 if train:
   network = dropout(network, 0.5)
 
-score_fr = score_layer(pool4, num_classes=num_classes, name='score_fr')
+# score_fr
+score_fr = score_layer(network, num_classes=num_classes, name='score_fr')
+
 pred = tf.argmax(score_fr, dimension=3)
 
-upscore = fc_layer(score_fr, 'fc8', num_classes=num_classes)
+# 1,27,27,20 (wronge feature dim)
+upscore2 = upscore_layer(score_fr, num_classes, shape=tf.shape(pool4))
 
-pred_up = tf.argmax(upscore, dimension=3)
+score_pool4 = score_layer(pool4, num_classes, name='score_pool4')
 
+fuse_pool4 = tf.add(upscore2, score_pool4)
+upscore4 = upscore_layer(fuse_pool4, num_classes, shape=tf.shape(pool3))
 
-# pred = tf.argmax(network, dimension=3)
+score_pool3 = score_layer(pool3, num_classes, name='score_pool3')
+fuse_pool3 = tf.add(upscore4, score_pool3)
 
-# upscore2 = upscore_layer(network,
-#                          shape=tf.shape(pool4),
-#                          num_classes=num_classes,
-#                          kernel_size=4, strides=2, name='upscore2')
-
-# score_pool4 = score_layer(pool4, num_classes=num_classes, name='score_pool4')
-# fuse_pool4 = tf.add(upscore2, score_pool4)
-
-# upscore4 = upscore_layer(fuse_pool4, num_classes=num_classes,
-#                          kernel_size=4, strides=2, name='upscore4')
-
-# score_pool3 = score_layer(pool3, num_classes=num_classes, name='score_pool3')
-# fuse_pool3 = tf.add(upscore4, score_pool3)
-
-# upscore32 = upscore_layer(fuse_pool3, num_classes=num_classes,
-#                           kernel_size=16, strides=8, name='upscore32')
-
-# pred_up = tf.argmax(upscore32, dimension=3)
+upscore32 = upscore_layer(fuse_pool3, num_classes)
+pred_up = tf.argmax(fuse_pool3, dimension=3)
 
 network = regression(network, optimizer='adam',
                      loss='categorical_crossentropy',
@@ -229,4 +223,5 @@ with model.session.graph.as_default():
     # scp.misc.imsave('fcn32_upsampled.png', up_color)
 
     #output = model.predict([resized])
+    #writer = tf.python.training.summary_io.SummaryWriter("./log", model)
     print ('woot')
