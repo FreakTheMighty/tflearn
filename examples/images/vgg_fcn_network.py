@@ -210,8 +210,8 @@ with model.session.graph.as_default():
     down_color = color_image(down[0])
     up_color = color_image(up[0])
 
-    misc.imsave('fcn32_downsampled.png', down_color)
-    misc.imsave('fcn32_upsampled.png', up_color)
+    misc.imsave('fcn8_downsampled.png', down_color)
+    misc.imsave('fcn8_upsampled.png', up_color)
 
     # output = model.predict([resized])
     # down, up = model.session.run(tensors, feed_dict=feed_dict)
