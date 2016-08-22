@@ -198,11 +198,6 @@ with model.session.graph.as_default():
     resized = misc.imresize(img, (224, 224))
     feed_dict = {images_placeholder: [resized]}
 
-    print('Finished building Network.')
-
-    #init = tf.initialize_all_variables()
-    #model.session.run(tf.initialize_all_variables())
-
     print('Running the Network')
     tensors = [pred, pred_up]
     down, up = model.session.run(tensors, feed_dict=feed_dict)
@@ -213,15 +208,3 @@ with model.session.graph.as_default():
     misc.imsave('fcn8_downsampled.png', down_color)
     misc.imsave('fcn8_upsampled.png', up_color)
 
-    # output = model.predict([resized])
-    # down, up = model.session.run(tensors, feed_dict=feed_dict)
-
-    # down_color = utils.color_image(down[0])
-    # up_color = utils.color_image(up[0])
-
-    # scp.misc.imsave('fcn32_downsampled.png', down_color)
-    # scp.misc.imsave('fcn32_upsampled.png', up_color)
-
-    #output = model.predict([resized])
-    #writer = tf.python.training.summary_io.SummaryWriter("./log", model)
-    print ('woot')
